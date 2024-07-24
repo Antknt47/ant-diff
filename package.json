@@ -1,0 +1,14 @@
+{
+  "name": "ant-diff",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@tensorflow-models/mobilenet": "^2.1.1",
+    "@tensorflow/tfjs": "^4.20.0",
+    "@tensorflow/tfjs-node": "^4.20.0",
+    "canvas": "^2.11.2",
+    "pdf-poppler": "^0.2.1"
+  }
+}
