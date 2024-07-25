@@ -4,6 +4,7 @@ import pdfPoppler from 'pdf-poppler';
 
 // Load config file
 import config from './config.js';
+import cv from '@techstark/opencv-js';
 
 // Input
 const folderFrom = config.from;
@@ -22,6 +23,15 @@ function ensureDir(dirPath) {
   }
 }
 
+
+function ensureDirectoryExistence(folder) {
+    if (!fs.existsSync(folder)) {
+        fs.mkdirSync(folder, { recursive: true });
+    }
+}
+
+ensureDirectoryExistence(tempFolder);
+ensureDirectoryExistence(outputFolder);
 
 async function convertPdfToImage(pdfPath, outputFolder, fileName) {
   const options = {
