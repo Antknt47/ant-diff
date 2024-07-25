@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import pdfPoppler from 'pdf-poppler';
+import Tesseract from 'tesseract.js';
 
 // Load config file
 import config from './config.js';
@@ -30,7 +31,7 @@ async function convertPdfToImage(pdfPath, outputFolder, fileName) {
   await pdfPoppler.convert(pdfPath, options);
 }
 
-// Main Steps
+// Main Steps I. convert pdf to images.
 async function processFolders() {
 
   // 1. Read paths of pdf files.
@@ -57,5 +58,52 @@ async function processFolders() {
   }
 }
 
-// Executes main step s
+// Execute main Step I.
 processFolders().catch(err => console.error(err));
+
+// Perform OCR on an image
+async function performOcr(imagePath) {
+  const worker = await createWorker({
+    logger: info => console.log(info), // Optional: log progress
+  });
+
+  // Load the language data from the custom path
+  await worker.load();
+  await worker.loadLanguage('eng');
+  await worker.initialize('eng', { langPath: langFolder });
+
+  // Perform OCR
+  const { data: { text } } = await worker.recognize(imagePath);
+
+  // Clean up
+  await worker.terminate();
+
+  return text;
+}
+
+// Main step II. Process all PNG files in the result directory
+async function processPngFiles() {
+  const directories = fs.readdirSync(folderResult).filter(file => fs.statSync(path.join(folderResult, file)).isDirectory());
+
+  for (const dir of directories) {
+    const dirPath = path.join(folderResult, dir);
+
+    // Get all PNG files in the current directory
+    const pngFiles = fs.readdirSync(dirPath).filter(file => file.endsWith('.png'));
+
+    for (const pngFile of pngFiles) {
+      const pngFilePath = path.join(dirPath, pngFile);
+      const jsonFilePath = path.join(dirPath, `${path.parse(pngFile).name}.json`);
+
+      // Perform OCR on the PNG file
+      const ocrResult = await performOcr(pngFilePath);
+
+      // Write OCR result to a JSON file
+      fs.writeFileSync(jsonFilePath, JSON.stringify({ text: ocrResult }, null, 2));
+      console.log(`OCR result for '${pngFile}' written to '${jsonFilePath}'`);
+    }
+  }
+}
+
+// Execute Main step II.
+processPngFiles().catch(err => console.error(err));
