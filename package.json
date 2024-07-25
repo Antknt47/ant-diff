@@ -5,9 +5,7 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
-    "@tensorflow-models/mobilenet": "^2.1.1",
-    "@tensorflow/tfjs": "^4.20.0",
-    "@tensorflow/tfjs-node": "^4.20.0",
+    "@techstark/opencv-js": "^4.9.0-release.3",
     "canvas": "^2.11.2",
     "pdf-poppler": "^0.2.1"
   }
