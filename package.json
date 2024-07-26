@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "diff": "^5.2.0",
     "pdf-poppler": "^0.2.1",
     "tesseract.js": "^5.1.0"
   }

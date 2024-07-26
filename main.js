@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import pdfPoppler from 'pdf-poppler';
 import Tesseract from 'tesseract.js';
+import { diffChars } from "diff";
 
 // Load config file
 import config from './config.js';
@@ -110,11 +111,11 @@ async function processFolders() {
   } 
 
   await Promise.all(convertPromises);
-  console.log("PDFs to PNGs convert complete.");
+  console.log("PDFs to PNGs convert completed.");
 
   // Recognize from PNGs.
   const pngFromFiles = getAllPngFiles(`${folderResult}/from`);
-  const pngToFiles = getAllPngFiles(`${folderResult}/from`);
+  const pngToFiles = getAllPngFiles(`${folderResult}/to`);
 
   console.log(`Recognizing: ${pngFromFiles.length + pngToFiles.length} file(s).`);
 
@@ -145,7 +146,7 @@ async function processFolders() {
   }
 
 
-
+// Recognize To PNGs.
   let toResults = new Map;
   let pngToCount = 0;
   let errorToCount = 0;
@@ -171,7 +172,30 @@ async function processFolders() {
   }
 
   await Promise.all(recognizePromises);
+  console.log("Recognize completed.")
 
+  console.log("Anlayzing...");
+  let csvContent = 'File,From fength,To length,Char diff(%)\n'; // CSV head
+  for(const [file, recoRlt] of fromResults) {
+    console.log("rlt: ", file);
+    const strFrom = recoRlt.data.text;
+    const strTo = toResults.get(file).data.text;
+
+
+    const diff = diffChars(strFrom, strTo);
+    let totalDiff = 0;
+    diff.forEach(part => {
+      if (part.added || part.removed) {
+        totalDiff += part.value.length;
+      }
+    });
+
+    const maxLength = Math.max(strFrom.length, strTo.length);
+    const differenceRate = maxLength > 0 ? ((totalDiff / maxLength) * 100).toFixed(2) : 0;
+    csvContent += `${file},${strFrom.length},${strTo.length},${differenceRate}\n`;
+  }
+
+  fs.writeFileSync(`${folderResult}/results.csv`, csvContent);
 }
 
 // Execute main Step I.
