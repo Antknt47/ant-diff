@@ -31,79 +31,148 @@ async function convertPdfToImage(pdfPath, outputFolder, fileName) {
   await pdfPoppler.convert(pdfPath, options);
 }
 
+function getAllPngFiles(dirPath) {
+  let results = [];
+
+  const list = fs.readdirSync(dirPath);
+
+  list.forEach(file => {
+    const filePath = path.join(dirPath, file);
+    const stats = fs.statSync(filePath);
+
+    if (stats.isDirectory()) {
+      results = results.concat(getAllPngFiles(filePath));
+    } else if (stats.isFile() && path.extname(file) === '.png') {
+      results.push(filePath);
+    }
+  });
+
+  return results;
+}
+
 // Main Steps I. convert pdf to images.
 async function processFolders() {
 
   // 1. Read paths of pdf files.
-  const files1 = fs.readdirSync(folderFrom).filter(file => file.endsWith('.pdf'));
-  const files2 = fs.readdirSync(folderTo).filter(file => file.endsWith('.pdf'));
+  const filesFrom = fs.readdirSync(folderFrom).filter(file => file.endsWith('.pdf'));
+  const filesTo = fs.readdirSync(folderTo).filter(file => file.endsWith('.pdf'));
 
-  // 2.Traverse filse
-  for (const file of files1) {
-    if (files2.includes(file)) {
-      // 3. Find file pairs which has the same name.
-      const pdfPath1 = path.join(folderFrom, file);
-      const pdfPath2 = path.join(folderTo, file);
-      const fileNameWithoutExt = path.parse(file).name;
+  // 2.Traverse files
+  let filesFromNum = filesFrom.length;
+  let filesToNum = filesTo.length;
 
-      // 4. Convert PDFs to images      
-      //  4.1 Create Output folder if not exist
-      ensureDir(`${folderResult}/from/${file}`);
-      ensureDir(`${folderResult}/to/${file}`);
-
-      //  4.2 Convert pdf to images of each page.
-      await convertPdfToImage(pdfPath1, `${folderResult}/from/${file}`, `${fileNameWithoutExt}`);
-      await convertPdfToImage(pdfPath2, `${folderResult}/to/${file}`, `${fileNameWithoutExt}`);
-    }
+  // Check file number.
+  if(filesFromNum != filesToNum) {
+    console.warn(`Warning: The number of files does not match. ${filesFromNum}, To files: ${filesToNum}`);
   }
+
+  // 3. Convert PDFs to images
+  const convertPromises = [];
+  console.log(`Converting PDFs...`);
+  let fromCount = 0;
+  const fromSum = filesFrom.length;
+  let toCount = 0;
+  const toSum = filesTo.length;
+  for (const file of filesFrom) {
+    const pdfPathFrom = path.join(folderFrom, file);
+
+    const fileNameWithoutExt = path.parse(file).name;
+
+    //  3.1 Create Output folder if not exist
+    ensureDir(`${folderResult}/from/${file}`);
+
+    //  3.2 Convert pdf to images of each page.
+    convertPromises.push(
+      convertPdfToImage(pdfPathFrom, `${folderResult}/from/${file}`, `${fileNameWithoutExt}`)
+      .then(()=>{
+        ++fromCount;
+        console.log(`From ${fromCount}/${fromSum}\tTo ${toCount}/${toSum}`);
+      }) 
+    );
+  }
+
+  for (const file of filesTo) {
+    const pdfPathTo = path.join(folderTo, file);
+
+    const fileNameWithoutExt = path.parse(file).name;
+
+    //  3.1 Create Output folder if not exist
+    ensureDir(`${folderResult}/to/${file}`);
+
+    //  3.2 Convert pdf to images of each page.
+    convertPromises.push(
+      convertPdfToImage(pdfPathTo, `${folderResult}/to/${file}`, `${fileNameWithoutExt}`)
+      .then(()=>{
+        ++toCount;
+        console.log(`From ${fromCount}/${fromSum}\tTo ${toCount}/${toSum}`);
+      }) 
+    );
+  } 
+
+  await Promise.all(convertPromises);
+  console.log("PDFs to PNGs convert complete.");
+
+  // Recognize from PNGs.
+  const pngFromFiles = getAllPngFiles(`${folderResult}/from`);
+  const pngToFiles = getAllPngFiles(`${folderResult}/from`);
+
+  console.log(`Recognizing: ${pngFromFiles.length + pngToFiles.length} file(s).`);
+
+  let recognizePromises = [];
+
+  let fromResults = new Map;
+  let pngFromCount = 0;
+  let errorFromCount = 0;
+  let pngFromSum = pngFromFiles.length;
+  for (const file of pngFromFiles) {
+    recognizePromises.push(
+      Tesseract.recognize(
+        file,
+        'jpn+eng',
+        {
+          cachePath: "./lang"
+        }
+      ).then((data) => {
+        fromResults.set(file.split("\\").slice(-2).join("\\"), data);
+        ++pngFromCount;
+        console.log(`Recognize(from):\t${pngFromCount}/${pngFromSum},\terror: ${errorFromCount}`);
+      }).catch(err => {
+        ++errorFromCount;
+        console.error('Recognize(from): ', err);
+        console.log(`Recognize(from):\t${pngFromCount}/${pngFromSum},\terror: ${errorFromCount}`);
+      })
+    );
+  }
+
+
+
+  let toResults = new Map;
+  let pngToCount = 0;
+  let errorToCount = 0;
+  const pngToSum = pngToFiles.length;
+  for (const file of pngToFiles) {
+    recognizePromises.push(
+      Tesseract.recognize(
+        file,
+        'jpn+eng',
+        {
+          cachePath: "./lang"
+        }
+      ).then((data) => {
+        toResults.set(file.split("\\").slice(-2).join("\\"), data);
+        ++pngToCount;
+        console.log(`Recognize(To):  \t${pngToCount}/${pngToSum},\terror: ${errorToCount}`);
+      }).catch(err => {
+        ++errorToCount;
+        console.error('Recognize(To): ', err);
+        console.log(`Recognize(To):  \t${pngToCount}/${pngToSum},\terror: ${errorToCount}`);
+      })
+    );
+  }
+
+  await Promise.all(recognizePromises);
+
 }
 
 // Execute main Step I.
 processFolders().catch(err => console.error(err));
-
-// Perform OCR on an image
-async function performOcr(imagePath) {
-  const worker = await createWorker({
-    logger: info => console.log(info), // Optional: log progress
-  });
-
-  // Load the language data from the custom path
-  await worker.load();
-  await worker.loadLanguage('eng');
-  await worker.initialize('eng', { langPath: langFolder });
-
-  // Perform OCR
-  const { data: { text } } = await worker.recognize(imagePath);
-
-  // Clean up
-  await worker.terminate();
-
-  return text;
-}
-
-// Main step II. Process all PNG files in the result directory
-async function processPngFiles() {
-  const directories = fs.readdirSync(folderResult).filter(file => fs.statSync(path.join(folderResult, file)).isDirectory());
-
-  for (const dir of directories) {
-    const dirPath = path.join(folderResult, dir);
-
-    // Get all PNG files in the current directory
-    const pngFiles = fs.readdirSync(dirPath).filter(file => file.endsWith('.png'));
-
-    for (const pngFile of pngFiles) {
-      const pngFilePath = path.join(dirPath, pngFile);
-      const jsonFilePath = path.join(dirPath, `${path.parse(pngFile).name}.json`);
-
-      // Perform OCR on the PNG file
-      const ocrResult = await performOcr(pngFilePath);
-
-      // Write OCR result to a JSON file
-      fs.writeFileSync(jsonFilePath, JSON.stringify({ text: ocrResult }, null, 2));
-      console.log(`OCR result for '${pngFile}' written to '${jsonFilePath}'`);
-    }
-  }
-}
-
-// Execute Main step II.
-processPngFiles().catch(err => console.error(err));
