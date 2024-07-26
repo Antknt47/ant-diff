@@ -181,7 +181,8 @@ async function processFolders() {
     const strFrom = recoRlt.data.text;
     const strTo = toResults.get(file).data.text;
 
-
+    fs.writeFileSync(`${folderResult}/from/${file}.txt`, strFrom);
+    fs.writeFileSync(`${folderResult}/to/${file}.txt`, strTo);
     const diff = diffChars(strFrom, strTo);
     let totalDiff = 0;
     diff.forEach(part => {
