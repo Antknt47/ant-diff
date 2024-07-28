@@ -3,9 +3,11 @@ import path from 'path';
 import pdfPoppler from 'pdf-poppler';
 import Tesseract from 'tesseract.js';
 import { diffChars } from "diff";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 // Load config file
 import config from './config.js';
+import { exit } from 'process';
 
 // Input
 const folderFrom = config.from;
@@ -51,6 +53,22 @@ function getAllPngFiles(dirPath) {
   return results;
 }
 
+async function extractTextFromPdf(pdfPath) {
+  const pdfBuffer = fs.readFileSync(pdfPath);
+  const pdfData = new Uint8Array(pdfBuffer);
+  const pdf = await getDocument({ data: pdfData }).promise;
+
+  let fullText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const textContent = await page.getTextContent();
+    fullText += textContent.items.map(item => item.str).join(' ');
+  }
+
+  return fullText;
+}
+
+
 // Main Steps I. convert pdf to images.
 async function processFolders() {
 
@@ -67,6 +85,38 @@ async function processFolders() {
     console.warn(`Warning: The number of files does not match. ${filesFromNum}, To files: ${filesToNum}`);
   }
 
+  // compare text by pdflib
+  let csvContentPdfLib = 'File,From fength,To length,Char diff(%)\n'; // CSV head
+  for(const file of filesFrom) {
+    const pdfPathFrom = path.join(folderFrom, file);
+    const pdfPathTo = path.join(folderTo, file);
+
+    const textFrom = await extractTextFromPdf(pdfPathFrom);
+    const textTo = await extractTextFromPdf(pdfPathTo);
+  
+    const diff = diffChars(textFrom, textTo);
+  
+    let totalDiff = 0;
+    diff.forEach(part => {
+      if (part.added || part.removed) {
+        totalDiff += part.value.length;
+      }
+    });
+  
+    const maxLength = Math.max(textFrom.length, textTo.length);
+    const differenceRate = maxLength > 0 ? ((totalDiff / maxLength) * 100).toFixed(2) : 0;
+
+    csvContentPdfLib += `${file},${textFrom.length},${textTo.length},${differenceRate}\n`;
+
+    console.log(`Difference rate: ${differenceRate}%`);
+    diff.forEach(part => {
+      const color = part.added ? 'green' :
+                    part.removed ? 'red' : 'grey';
+      console.log(`%c${part.value}`, `color: ${color}`);
+    });
+  }
+  fs.writeFileSync(`${folderResult}/results.csv`, csvContentPdfLib);
+  process.exit(0);
   // 3. Convert PDFs to images
   const convertPromises = [];
   console.log(`Converting PDFs...`);
@@ -109,7 +159,7 @@ async function processFolders() {
       }) 
     );
   } 
-
+  
   await Promise.all(convertPromises);
   console.log("PDFs to PNGs convert completed.");
 
