@@ -1,13 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import pdfPoppler from 'pdf-poppler';
-import Tesseract from 'tesseract.js';
-import { diffChars } from "diff";
+import { diffChars, createPatch } from "diff";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import * as Diff2HTML from "diff2html";
 
 // Load config file
 import config from './config.js';
-import { exit } from 'process';
 
 // Input
 const folderFrom = config.from;
@@ -23,6 +22,7 @@ function ensureDir(dirPath) {
   }
 }
 
+// Convert PDFs to PNGs.
 async function convertPdfToImage(pdfPath, outputFolder, fileName) {
   const options = {
     format: 'png',
@@ -62,7 +62,12 @@ async function extractTextFromPdf(pdfPath) {
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
-    fullText += textContent.items.map(item => item.str).join(' ');
+    if(config.onlyDiffText) {
+      fullText += textContent.items.map(item => `${item.str}`).join('\n');
+    } else {
+      // TODO: make more format check.
+      fullText += textContent.items.map(item => `<item font:${item.fontName};>\n\t${item.str}\n</item>`).join('\n');
+    }
   }
 
   return fullText;
@@ -80,12 +85,12 @@ async function processFolders() {
   let filesFromNum = filesFrom.length;
   let filesToNum = filesTo.length;
 
-  // Check file number.
+  // Count and check file number.
   if(filesFromNum != filesToNum) {
     console.warn(`Warning: The number of files does not match. ${filesFromNum}, To files: ${filesToNum}`);
   }
 
-  // compare text by pdflib
+  // Compare text by pdflib
   let csvContentPdfLib = 'File,From fength,To length,Char diff(%)\n'; // CSV head
   for(const file of filesFrom) {
     const pdfPathFrom = path.join(folderFrom, file);
@@ -109,15 +114,50 @@ async function processFolders() {
     csvContentPdfLib += `${file},${textFrom.length},${textTo.length},${differenceRate}\n`;
 
     console.log(`Difference rate: ${differenceRate}%`);
-    diff.forEach(part => {
-      const color = part.added ? 'green' :
-                    part.removed ? 'red' : 'grey';
-      console.log(`%c${part.value}`, `color: ${color}`);
+
+    const diffString = createPatch(file, textFrom, textTo);
+    const diffHTML = Diff2HTML.html(diffString, {    drawFileList: false,
+      fileListToggle: false,
+      fileListStartVisible: false,
+      fileContentToggle: false,
+      matching: 'lines',
+      outputFormat: 'side-by-side',
+      synchronisedScroll: true,
+      highlight: true,
+      renderNothingWhenEmpty: false,
     });
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <!-- Make sure to load the highlight.js CSS file before the Diff2Html CSS file -->
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.7.1/styles/github.min.css" />
+        <link
+          rel="stylesheet"
+          type="text/css"
+          href="../../assert/diff2html.min.css"
+        />
+        <script type="text/javascript" src="../../assert/diff2html-ui.min.js"></script>
+      </head>
+      <body>
+          <div id="diff-container">${diffHTML}</div>
+          <script src="../../assets/js/diff2html.min.js"></script>
+          <script>
+              const diffHtml = document.getElementById('diff-container').innerHTML;
+              const diffContainer = document.getElementById('diff-container');
+              diffContainer.innerHTML = Diff2Html.html(diffHtml, { drawFileList: true, outputFormat: 'side-by-side' });
+          </script>
+      </body>
+      </html>
+    `;
+
+    fs.writeFileSync(`${folderResult}/${file}.html`, htmlContent);
   }
   fs.writeFileSync(`${folderResult}/results.csv`, csvContentPdfLib);
-  process.exit(0);
-  // 3. Convert PDFs to images
+
+  // 3. Convert PDFs to images (not use, reserved for now)
   const convertPromises = [];
   console.log(`Converting PDFs...`);
   let fromCount = 0;
@@ -162,91 +202,6 @@ async function processFolders() {
   
   await Promise.all(convertPromises);
   console.log("PDFs to PNGs convert completed.");
-
-  // Recognize from PNGs.
-  const pngFromFiles = getAllPngFiles(`${folderResult}/from`);
-  const pngToFiles = getAllPngFiles(`${folderResult}/to`);
-
-  console.log(`Recognizing: ${pngFromFiles.length + pngToFiles.length} file(s).`);
-
-  let recognizePromises = [];
-
-  let fromResults = new Map;
-  let pngFromCount = 0;
-  let errorFromCount = 0;
-  let pngFromSum = pngFromFiles.length;
-  for (const file of pngFromFiles) {
-    recognizePromises.push(
-      Tesseract.recognize(
-        file,
-        'jpn+eng',
-        {
-          cachePath: "./lang"
-        }
-      ).then((data) => {
-        fromResults.set(file.split("\\").slice(-2).join("\\"), data);
-        ++pngFromCount;
-        console.log(`Recognize(from):\t${pngFromCount}/${pngFromSum},\terror: ${errorFromCount}`);
-      }).catch(err => {
-        ++errorFromCount;
-        console.error('Recognize(from): ', err);
-        console.log(`Recognize(from):\t${pngFromCount}/${pngFromSum},\terror: ${errorFromCount}`);
-      })
-    );
-  }
-
-
-// Recognize To PNGs.
-  let toResults = new Map;
-  let pngToCount = 0;
-  let errorToCount = 0;
-  const pngToSum = pngToFiles.length;
-  for (const file of pngToFiles) {
-    recognizePromises.push(
-      Tesseract.recognize(
-        file,
-        'jpn+eng',
-        {
-          cachePath: "./lang"
-        }
-      ).then((data) => {
-        toResults.set(file.split("\\").slice(-2).join("\\"), data);
-        ++pngToCount;
-        console.log(`Recognize(To):  \t${pngToCount}/${pngToSum},\terror: ${errorToCount}`);
-      }).catch(err => {
-        ++errorToCount;
-        console.error('Recognize(To): ', err);
-        console.log(`Recognize(To):  \t${pngToCount}/${pngToSum},\terror: ${errorToCount}`);
-      })
-    );
-  }
-
-  await Promise.all(recognizePromises);
-  console.log("Recognize completed.")
-
-  console.log("Anlayzing...");
-  let csvContent = 'File,From fength,To length,Char diff(%)\n'; // CSV head
-  for(const [file, recoRlt] of fromResults) {
-    console.log("rlt: ", file);
-    const strFrom = recoRlt.data.text;
-    const strTo = toResults.get(file).data.text;
-
-    fs.writeFileSync(`${folderResult}/from/${file}.txt`, strFrom);
-    fs.writeFileSync(`${folderResult}/to/${file}.txt`, strTo);
-    const diff = diffChars(strFrom, strTo);
-    let totalDiff = 0;
-    diff.forEach(part => {
-      if (part.added || part.removed) {
-        totalDiff += part.value.length;
-      }
-    });
-
-    const maxLength = Math.max(strFrom.length, strTo.length);
-    const differenceRate = maxLength > 0 ? ((totalDiff / maxLength) * 100).toFixed(2) : 0;
-    csvContent += `${file},${strFrom.length},${strTo.length},${differenceRate}\n`;
-  }
-
-  fs.writeFileSync(`${folderResult}/results.csv`, csvContent);
 }
 
 // Execute main Step I.
