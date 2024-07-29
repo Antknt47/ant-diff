@@ -91,7 +91,7 @@ async function processFolders() {
   }
 
   // Compare text by pdflib
-  let csvContentPdfLib = 'File,From fength,To length,Char diff(%)\n'; // CSV head
+  let csvContentPdfLib = 'File,From length,To length,Char diff(%)\n'; // CSV head
   for(const file of filesFrom) {
     const pdfPathFrom = path.join(folderFrom, file);
     const pdfPathTo = path.join(folderTo, file);
